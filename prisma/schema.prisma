@@ -1,0 +1,297 @@
+// This is your Prisma schema file
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 用户模型
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  hashedPassword String?
+  bio           String?   @db.Text
+  avatarUrl     String?
+  joinedAt      DateTime  @default(now())
+  preferences   Json?
+  accounts      Account[]
+  sessions      Session[]
+
+  // 关联
+  playlists     Playlist[]
+  favorites     Favorite[]
+  followers     Follows[] @relation("following")
+  following     Follows[] @relation("follower")
+  
+  // 会员信息
+  subscription  Subscription?
+
+  // 标签相关
+  tagVersions         TagVersion[]
+  notifications       Notification[]
+  tagPermissions      TagPermission[]
+  targetAuditLogs     TagPermissionAudit[] @relation("targetUser")
+  actorAuditLogs      TagPermissionAudit[] @relation("actorUser")
+  permissionTemplates PermissionTemplate[]
+
+  // 播放历史
+  playHistory PlayHistory[]
+}
+
+// 音乐模型
+model Track {
+  id          String    @id @default(cuid())
+  title       String
+  artist      Artist    @relation(fields: [artistId], references: [id])
+  artistId    String
+  album       Album     @relation(fields: [albumId], references: [id])
+  albumId     String
+  duration    Int
+  coverImage  String?
+  audioUrl    String
+  lyrics      String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // 关联
+  playlists   PlaylistTrack[]
+  favorites   Favorite[]
+  tags        Tag[]
+  playHistory PlayHistory[]
+
+  @@unique([artistId, albumId, title])
+}
+
+// 播放列表模型
+model Playlist {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  coverImage  String?
+  isPublic    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // 关联
+  user        User      @relation(fields: [userId], references: [id])
+  userId      String
+  tracks      PlaylistTrack[]
+  tags        Tag[]
+}
+
+// 播放列表-音乐关联
+model PlaylistTrack {
+  playlist    Playlist  @relation(fields: [playlistId], references: [id])
+  playlistId  String
+  track       Track     @relation(fields: [trackId], references: [id])
+  trackId     String
+  addedAt     DateTime  @default(now())
+
+  @@id([playlistId, trackId])
+}
+
+// 收藏模型
+model Favorite {
+  user        User      @relation(fields: [userId], references: [id])
+  userId      String
+  track       Track     @relation(fields: [trackId], references: [id])
+  trackId     String
+  createdAt   DateTime  @default(now())
+
+  @@id([userId, trackId])
+}
+
+// 关注关系模型
+model Follows {
+  follower    User      @relation("follower", fields: [followerId], references: [id])
+  followerId  String
+  following   User      @relation("following", fields: [followingId], references: [id])
+  followingId String
+  createdAt   DateTime  @default(now())
+
+  @@id([followerId, followingId])
+}
+
+// 会员订阅模型
+model Subscription {
+  id          String    @id @default(cuid())
+  type        String    // 'free', 'premium', 'family'
+  status      String    // 'active', 'cancelled', 'expired'
+  startDate   DateTime  @default(now())
+  endDate     DateTime?
+  
+  // 关联
+  user        User      @relation(fields: [userId], references: [id])
+  userId      String    @unique
+}
+
+model Account {
+  id                 String  @id @default(cuid())
+  userId             String
+  type               String
+  provider           String
+  providerAccountId  String
+  refresh_token      String?  @db.Text
+  access_token       String?  @db.Text
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String?  @db.Text
+  session_state      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model TagVersion {
+  id        String   @id
+  tag       String
+  version   Int
+  changes   Json     // 存储 TagChange[] 数组
+  timestamp DateTime
+  authorId  String?
+  author    User?    @relation(fields: [authorId], references: [id])
+
+  @@unique([tag, version])
+}
+
+// 添加通知模型
+model Notification {
+  id        String   @id @default(cuid())
+  type      String
+  tag       String
+  change    Json     // 存储变更信息
+  timestamp DateTime @default(now())
+  read      Boolean  @default(false)
+  userId    String   // 通知接收者
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// 添加标签权限模型
+model TagPermission {
+  id        String   @id @default(cuid())
+  tag       String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String   // admin, editor, viewer
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tag, userId])
+  @@index([tag])
+}
+
+// 添加权限继承关系
+model TagHierarchy {
+  id        String   @id @default(cuid())
+  parentTag String
+  childTag  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([parentTag, childTag])
+  @@index([parentTag])
+  @@index([childTag])
+}
+
+// 添加权限审计日志
+model TagPermissionAudit {
+  id          String   @id @default(cuid())
+  tag         String
+  userId      String
+  actorId     String   // 执行操作的用户
+  action      String   // add, update, remove
+  oldRole     String?
+  newRole     String?
+  timestamp   DateTime @default(now())
+  description String?
+
+  user    User     @relation("targetUser", fields: [userId], references: [id])
+  actor   User     @relation("actorUser", fields: [actorId], references: [id])
+
+  @@index([tag])
+  @@index([userId])
+  @@index([actorId])
+}
+
+// 添加权限模板模型
+model PermissionTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  roles       Json     // 存储 { userId: string, role: string }[] 数组
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  creatorId   String
+  creator     User     @relation(fields: [creatorId], references: [id])
+
+  @@index([creatorId])
+}
+
+model Artist {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  imageUrl    String?
+  description String?
+  tracks      Track[]
+  albums      Album[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Album {
+  id          String    @id @default(cuid())
+  name        String
+  imageUrl    String?
+  artist      Artist    @relation(fields: [artistId], references: [id])
+  artistId    String
+  tracks      Track[]
+  releaseDate DateTime
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([artistId, name])
+}
+
+model Tag {
+  id          String     @id @default(cuid())
+  name        String     @unique
+  tracks      Track[]
+  playlists   Playlist[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model PlayHistory {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  track     Track    @relation(fields: [trackId], references: [id])
+  trackId   String
+  playedAt  DateTime @default(now())
+} 
